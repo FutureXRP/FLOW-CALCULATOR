@@ -1,331 +1,387 @@
-<!DOCTYPE html>
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FLOWmetrics Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h1 { text-align: center; }
-        form { max-width: 600px; margin: 0 auto; }
-        label { display: block; margin-top: 10px; }
-        input, select { width: 100%; padding: 5px; }
-        button { margin-top: 20px; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; width: 100%; }
-        #resultsContainer { margin-top: 20px; }
-        .tooltip { position: relative; display: block; margin-bottom: 10px; }
-        .tooltip .tooltiptext { visibility: hidden; width: 300px; background-color: black; color: #fff; text-align: center; border-radius: 6px; padding: 5px; position: absolute; z-index: 1; top: -5px; left: 105%; opacity: 0; transition: opacity 0.3s; }
-        .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
-        .section { margin-top: 20px; }
-        .section h3 { font-size: 1.2em; }
-        .resources { text-align: center; margin-top: 30px; }
-        .resources a { margin: 0 10px; }
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 300px;
+            background-color: #333;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            top: 100%;
+            left: 50%;
+            margin-left: -150px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        .collapsible-header {
+            cursor: pointer;
+            padding: 8px;
+            background-color: #e5e7eb;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+        .collapsible-content {
+            display: none;
+            padding: 8px;
+        }
     </style>
 </head>
-<body>
-    <h1>FLOWmetrics Calculator</h1>
-    <p style="text-align: center;">Calculate the Functional Liquidity Operating Worth Metrics for utility tokens like XRP.</p>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto p-4 max-w-4xl">
+        <h1 class="text-3xl font-bold text-center mb-6">FLOWmetrics Calculator</h1>
+        <p class="text-center mb-4">Calculate the Functional Liquidity Operating Worth Metrics for utility tokens like XRP.</p>
 
-    <form>
-        <div class="section">
-            <h3>Input Parameters</h3>
-            <label for="settlementType">Settlement Volume Type</label>
-            <select id="settlementType">
-                <option value="total">Total (On-Chain + Off-Chain)</option>
-                <option value="onchain">On-Chain Only</option>
-            </select>
-
-            <label for="asv">Annual Settlement Volume ($ ASV)</label>
-            <input type="number" id="asv" required>
-
-            <label for="asvGrowth">ASV Growth Rate (% per year)</label>
-            <input type="number" id="asvGrowth">
-
-            <label for="velocity">Velocity (times per year)</label>
-            <input type="number" id="velocity" required>
-
-            <label for="velocityChange">Velocity Change Rate (% per year)</label>
-            <input type="number" id="velocityChange">
-
-            <label for="forecastHorizon">Forecast Horizon (years)</label>
-            <input type="number" id="forecastHorizon" value="5">
-
-            <label for="totalSupply">Total Circulating Supply (tokens)</label>
-            <input type="number" id="totalSupply" required>
-
-            <label for="lockedSupply">Locked Supply Percentage (%)</label>
-            <input type="number" id="lockedSupply">
-
-            <label for="additionalLocked">Additional Locked Supply Next Year (%)</label>
-            <input type="number" id="additionalLocked">
-
-            <label for="burnRate">Yearly Burn Rate (tokens, optional)</label>
-            <input type="number" id="burnRate">
-            <label><input type="checkbox" id="useBurnRate"> Use Burn Rate</label>
-
-            <label for="liquidityBuffer">Liquidity Buffer Ratio (optional)</label>
-            <input type="number" id="liquidityBuffer">
-            <label><input type="checkbox" id="useLiquidityBuffer"> Use Liquidity Buffer</label>
-
-            <label for="marketPrice">Current Market Price ($)</label>
-            <input type="number" id="marketPrice" required>
-
-            <label for="gasUsed">Total Gas Used</label>
-            <input type="number" id="gasUsed">
-
-            <label for="activeWallets">Active Wallets</label>
-            <input type="number" id="activeWallets">
-
-            <label for="giniCoefficient">Gini Coefficient</label>
-            <input type="number" id="giniCoefficient">
-
-            <label for="slippageThreshold">Slippage Threshold</label>
-            <input type="number" id="slippageThreshold">
-
-            <label for="marketDepth">Market Depth</label>
-            <input type="number" id="marketDepth">
-
-            <label for="energyUsed">Energy Consumed (e.g., KWh)</label>
-            <input type="number" id="energyUsed">
-
-            <label for="stakingVelocity">Staking Velocity (optional)</label>
-            <input type="number" id="stakingVelocity">
-
-            <label for="nominalVelocity">Nominal Velocity (optional)</label>
-            <input type="number" id="nominalVelocity">
-
-            <label for="deltaAsvPercent">Delta ASV Percent (for elasticity)</label>
-            <input type="number" id="deltaAsvPercent">
-
-            <label for="deltaMarketCapPercent">Delta Market Cap Percent (for elasticity)</label>
-            <input type="number" id="deltaMarketCapPercent" value="1">
-
-            <label for="deltaVelocityPercent">Delta Velocity Percent (for sensitivity)</label>
-            <input type="number" id="deltaVelocityPercent">
-
-            <label for="stdDev30Day">30-Day Std Dev (for volatility)</label>
-            <input type="number" id="stdDev30Day">
-
-            <label for="stdDev90Day">90-Day Std Dev (for volatility)</label>
-            <input type="number" id="stdDev90Day">
-
-            <label for="annualFlowReturn">Annual FLOW Return (%)</label>
-            <input type="number" id="annualFlowReturn">
-
-            <label for="marketReturn">Market Return (%)</label>
-            <input type="number" id="marketReturn" value="1">
-
-            <label for="minEffectiveSupply">Min Effective Supply (for stress test)</label>
-            <input type="number" id="minEffectiveSupply">
-
-            <label for="theoreticalFlow">Theoretical FLOW (optional)</label>
-            <input type="number" id="theoreticalFlow">
-
-            <label for="newLiquidityBuffer">New Liquidity Buffer (%)</label>
-            <input type="number" id="newLiquidityBuffer">
-
-            <button type="button" onclick="calculateMetrics()">Calculate</button>
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-xl font-semibold mb-4">Input Parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Settlement Volume Type</label>
+                    <select id="settlementType" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm">
+                        <option value="total">Total (On-Chain + Off-Chain)</option>
+                        <option value="onchain">On-Chain Only</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Annual Settlement Volume ($ ASV)</label>
+                    <input type="number" id="asv" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 2000000000000">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">ASV Growth Rate (% per year)</label>
+                    <input type="number" id="asvGrowth" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 5">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Velocity (times per year)</label>
+                    <input type="number" id="velocity" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 10">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Velocity Change Rate (% per year)</label>
+                    <input type="number" id="velocityChange" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., -2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Forecast Horizon (years)</label>
+                    <input type="number" id="forecastHorizon" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 5">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Total Circulating Supply (tokens)</label>
+                    <input type="number" id="totalSupply" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 100000000000">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Locked Supply Percentage (%)</label>
+                    <input type="number" id="lockedSupply" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 20">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Additional Locked Supply Next Year (%)</label>
+                    <input type="number" id="additionalLocked" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 5">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Yearly Burn Rate (tokens, optional)</label>
+                    <div class="flex items-center">
+                        <input type="number" id="burnRate" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 1000000000">
+                        <input type="checkbox" id="useBurn" class="ml-2">
+                        <label for="useBurn" class="ml-1 text-sm">Use Burn Rate</label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Liquidity Buffer Ratio (optional)</label>
+                    <div class="flex items-center">
+                        <input type="number" id="liquidityBuffer" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 15">
+                        <input type="checkbox" id="useBuffer" class="ml-2">
+                        <label for="useBuffer" class="ml-1 text-sm">Use Liquidity Buffer</label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Current Market Price ($)</label>
+                    <input type="number" id="marketPrice" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm" placeholder="e.g., 0.5">
+                </div>
+            </div>
+            <button onclick="calculateMetrics()" class="mt-4 w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700">Calculate</button>
         </div>
-    </form>
 
-    <div id="resultsContainer" class="section">
-        <h3>Results</h3>
-        <div class="section">
-            <h4>Core Valuation Metrics</h4>
-            <div class="tooltip"><strong>Current Effective Circulating Supply:</strong> 0<span class="tooltiptext">Total supply adjusted for locked tokens.</span></div>
-            <div class="tooltip"><strong>Current Market Capitalization:</strong> $0<span class="tooltiptext">Effective supply × current market price.</span></div>
-            <div class="tooltip"><strong>FLOW (Economic Base):</strong> $0<span class="tooltiptext">ASV ÷ Velocity, the economic base needed to support transactions.</span></div>
-            <div class="tooltip"><strong>Adjusted FLOW (with buffer):</strong> $0<span class="tooltiptext">FLOW × (1 + Liquidity Buffer), adjusted for market stability.</span></div>
-            <div class="tooltip"><strong>Implied Price per Token:</strong> $0.00<span class="tooltiptext">Adjusted FLOW ÷ Effective Supply, the fair price based on utility.</span></div>
-            <div class="tooltip"><strong>Fair Market Gap (%):</strong> 0.00%<span class="tooltiptext">Percentage price increase needed to match FLOW’s fair value. Positive means undervalued.</span></div>
-            <div class="tooltip"><strong>FLOW-to-Price Ratio:</strong> 0.00<span class="tooltiptext">FLOW ÷ (Market Price × Effective Supply). Above 1 means fair utility price is higher than current.</span></div>
-            <div class="tooltip"><strong>FLOW Premium (%):</strong> 0.00%<span class="tooltiptext">(Market Cap − Adjusted FLOW) ÷ Adjusted FLOW × 100%. Positive means undervalued.</span></div>
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <h2 class="text-xl font-semibold mb-4">Results</h2>
+            <div id="coreValuation" class="mb-4">
+                <div class="collapsible-header font-medium">Core Valuation Metrics</div>
+                <div class="collapsible-content grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="tooltip">
+                        <p><strong>Current Effective Circulating Supply:</strong> <span id="effectiveSupply">0</span></p>
+                        <span class="tooltiptext">Total supply adjusted for locked tokens.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Current Market Capitalization:</strong> <span id="marketCap">$0</span></p>
+                        <span class="tooltiptext">Effective supply × current market price.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>FLOW (Economic Base):</strong> <span id="flow">$0</span></p>
+                        <span class="tooltiptext">ASV ÷ Velocity, the economic base needed to support transactions.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Adjusted FLOW (with buffer):</strong> <span id="adjustedFlow">$0</span></p>
+                        <span class="tooltiptext">FLOW × (1 + Liquidity Buffer), adjusted for market stability.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Implied Price per Token:</strong> <span id="impliedPrice">$0.00</span></p>
+                        <span class="tooltiptext">Adjusted FLOW ÷ Effective Supply, the fair price based on utility.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Fair Market Gap (%):</strong> <span id="fairMarketGap">0.00%</span></p>
+                        <span class="tooltiptext">Percentage price increase needed to match FLOW’s fair value. Positive means undervalued.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>FLOW-to-Price Ratio:</strong> <span id="flowToPrice">0.00</span></p>
+                        <span class="tooltiptext">FLOW ÷ (Market Price × Effective Supply). Above 1 means fair utility price is higher than current.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>FLOW Premium (%):</strong> <span id="flowPremium">0.00%</span></p>
+                        <span class="tooltiptext">(Market Cap − Adjusted FLOW) ÷ Adjusted FLOW × 100%. Positive means undervalued.</span>
+                    </div>
+                </div>
+            </div>
+            <div id="efficiencyUtility" class="mb-4">
+                <div class="collapsible-header font-medium">Efficiency & Utility Metrics</div>
+                <div class="collapsible-content grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="tooltip">
+                        <p><strong>FLOW Yield:</strong> <span id="flowYield">0.00</span></p>
+                        <span class="tooltiptext">FLOW ÷ Market Cap. Higher values indicate more liquidity support per dollar of market cap.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>FLOW Efficiency:</strong> <span id="flowEfficiency">0.00</span></p>
+                        <span class="tooltiptext">ASV ÷ Market Cap. Higher values show more settlement volume per dollar of market cap.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Utilization Rate:</strong> <span id="utilizationRate">0.00</span></p>
+                        <span class="tooltiptext">ASV ÷ Adjusted FLOW. Measures how fully the economic base is utilized.</span>
+                    </div>
+                </div>
+            </div>
+            <div id="liquidityStability" class="mb-4">
+                <div class="collapsible-header font-medium">Liquidity & Stability Metrics</div>
+                <div class="collapsible-content grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="tooltip">
+                        <p><strong>Liquidity Stress Buffer Ratio:</strong> <span id="liquidityBufferRatio">0.00</span></p>
+                        <span class="tooltiptext">(Liquidity Buffer × FLOW) ÷ Market Cap. Assesses liquidity reserves relative to valuation.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Price Stability under 10% Velocity Drop:</strong> <span id="priceStability">0.00</span></p>
+                        <span class="tooltiptext">New Implied Price ÷ Current Implied Price at Velocity × 0.9. Tests price resilience.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Burn Amplification Factor:</strong> <span id="burnAmplification">0.00</span></p>
+                        <span class="tooltiptext">New Implied Price after Burn ÷ Current Implied Price. Quantifies price impact of burns.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Lock-up Flex Impact:</strong> <span id="lockupImpact">0.00</span></p>
+                        <span class="tooltiptext">New Implied Price with Lock-up ÷ Current Implied Price. Measures price effects of lock-ups.</span>
+                    </div>
+                </div>
+            </div>
+            <div id="comparativeRatios" class="mb-4">
+                <div class="collapsible-header font-medium">Comparative Ratios</div>
+                <div class="collapsible-content grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="tooltip">
+                        <p><strong>FLOW Ratio:</strong> <span id="flowRatio">0.00</span></p>
+                        <span class="tooltiptext">Market Cap ÷ FLOW. ~1 means price aligns with utility; >1 indicates speculative premium.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>FLOW Ratio (%):</strong> <span id="flowRatioPercent">0.0%</span></p>
+                        <span class="tooltiptext">Market Cap ÷ FLOW × 100%. Below 100% suggests undervaluation.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Market Cap Coverage vs. Adjusted FLOW:</strong> <span id="marketCapCoverage">0.00</span></p>
+                        <span class="tooltiptext">Market Cap ÷ Adjusted FLOW. Measures market cap sufficiency for liquidity-adjusted FLOW.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>Burn-Adjusted Fair Price:</strong> <span id="burnAdjustedPrice">$0.00</span></p>
+                        <span class="tooltiptext">Adjusted FLOW ÷ Effective Supply after Burn. Adjusts fair price for token burns.</span>
+                    </div>
+                </div>
+            </div>
+            <div id="forecastingScenario" class="mb-4">
+                <div class="collapsible-header font-medium">Forecasting & Scenario Metrics</div>
+                <div class="collapsible-content grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="tooltip">
+                        <p><strong>Future Price (in <span id="forecastYears">0</span> years):</strong> <span id="futurePrice">$0.00</span></p>
+                        <span class="tooltiptext">Projected ASV ÷ Projected Velocity ÷ Projected Effective Supply. Forecasts price based on growth.</span>
+                    </div>
+                    <div class="tooltip">
+                        <p><strong>5-year CAGR FLOW Price:</strong> <span id="cagrPrice">0.00%</span></p>
+                        <span class="tooltiptext">(Future Price ÷ Current Price)^(1/5) - 1. Estimates annualized price growth.</span>
+                    </div>
+                </div>
+            </div>
+            <div id="operationalRatios" class="mb-4">
+                <div class="collapsible-header font-medium">Operational Ratios</div>
+                <div class="collapsible-content grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="tooltip">
+                        <p><strong>Settlement Coverage Ratio:</strong> <span id="settlementCoverage">0.00</span></p>
+                        <span class="tooltiptext">ASV ÷ (Effective Supply × Price). Measures transaction coverage relative to valuation.</span>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="section">
-            <h4>Efficiency & Utility Metrics</h4>
-            <div class="tooltip"><strong>FLOW Yield:</strong> 0.00<span class="tooltiptext">FLOW ÷ Market Cap. Higher values indicate more liquidity support per dollar of market cap.</span></div>
-            <div class="tooltip"><strong>FLOW Efficiency:</strong> 0.00<span class="tooltiptext">ASV ÷ Market Cap. Higher values show more settlement volume per dollar of market cap.</span></div>
-            <div class="tooltip"><strong>Utilization Rate:</strong> 0.00<span class="tooltiptext">ASV ÷ Adjusted FLOW. Measures how fully the economic base is utilized.</span></div>
-        </div>
-        <div class="section">
-            <h4>Liquidity & Stability Metrics</h4>
-            <div class="tooltip"><strong>Liquidity Stress Buffer Ratio:</strong> 0.00<span class="tooltiptext">(Liquidity Buffer × FLOW) ÷ Market Cap. Assesses liquidity reserves relative to valuation.</span></div>
-            <div class="tooltip"><strong>Price Stability under 10% Velocity Drop:</strong> 0.00<span class="tooltiptext">New Implied Price ÷ Current Implied Price at Velocity × 0.9. Tests price resilience.</span></div>
-            <div class="tooltip"><strong>Burn Amplification Factor:</strong> 0.00<span class="tooltiptext">New Implied Price after Burn ÷ Current Implied Price. Quantifies price impact of burns.</span></div>
-            <div class="tooltip"><strong>Lock-up Flex Impact:</strong> 0.00<span class="tooltiptext">New Implied Price with Lock-up ÷ Current Implied Price. Measures price effects of lock-ups.</span></div>
-        </div>
-        <div class="section">
-            <h4>Comparative Ratios</h4>
-            <div class="tooltip"><strong>FLOW Ratio:</strong> 0.00<span class="tooltiptext">Market Cap ÷ FLOW. ~1 means price aligns with utility; >1 indicates speculative premium.</span></div>
-            <div class="tooltip"><strong>FLOW Ratio (%):</strong> 0.0%<span class="tooltiptext">Market Cap ÷ FLOW × 100%. Below 100% suggests undervaluation.</span></div>
-            <div class="tooltip"><strong>Market Cap Coverage vs. Adjusted FLOW:</strong> 0.00<span class="tooltiptext">Market Cap ÷ Adjusted FLOW. Measures market cap sufficiency for liquidity-adjusted FLOW.</span></div>
-            <div class="tooltip"><strong>Burn-Adjusted Fair Price:</strong> $0.00<span class="tooltiptext">Adjusted FLOW ÷ Effective Supply after Burn. Adjusts fair price for token burns.</span></div>
-        </div>
-        <div class="section">
-            <h4>Forecasting & Scenario Metrics</h4>
-            <div class="tooltip"><strong>Future Price (in 0 years):</strong> $0.00<span class="tooltiptext">Projected ASV ÷ Projected Velocity ÷ Projected Effective Supply. Forecasts price based on growth.</span></div>
-            <div class="tooltip"><strong>5-year CAGR FLOW Price:</strong> 0.00%<span class="tooltiptext">(Future Price ÷ Current Price)^(1/5) - 1. Estimates annualized price growth.</span></div>
-        </div>
-        <div class="section">
-            <h4>Operational Ratios</h4>
-            <div class="tooltip"><strong>Settlement Coverage Ratio:</strong> 0.00<span class="tooltiptext">ASV ÷ (Effective Supply × Price). Measures transaction coverage relative to valuation.</span></div>
-        </div>
-    </div>
 
-    <div class="resources">
-        <h3>📚 Explore More FLOWmetrics Resources</h3>
-        <p><a href="https://github.com/FutureXRP/FLOW-CALCULATOR">🌐 View the Full FLOWmetrics Repository on GitHub</a></p>
-        <p><a href="#">📝 Read the Cheat Sheet & Beginner Guide</a></p>
-        <p>Created by Matt Blair.</p>
+        <footer class="text-center mt-6">
+            <div style="margin-top: 40px; text-align: center; font-family: sans-serif;">
+  <h3>📚 Explore More FLOWmetrics Resources</h3>
+  
+  <p>
+    <a href="https://github.com/futurexrp/FLOW-CALCULATOR" target="_blank"
+       style="display: inline-block; margin: 8px; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">
+      🌐 View the Full FLOWmetrics Repository on GitHub
+    </a>
+  </p>
+
+  <p>
+    <a href="https://github.com/futurexrp/FLOW-CALCULATOR/blob/main/FLOWmetrics_Resources.md" target="_blank"
+       style="display: inline-block; margin: 8px; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px;">
+      📝 Read the Cheat Sheet & Beginner Guide
+    </a>
+  </p>
+
+  <p>
+    <a href="https://github.com/futurexrp/FLOW-CALCULATOR/raw/main/FLOWmetrics_WhitePaper.pdf" target="_blank"
+       style="display: inline-block; margin: 8px; padding: 10px 20px; background: #FF9800; color: white; text-decoration: none; border-radius: 5px;">
+
+                <p>Created by Matt Blair.
+        </footer>
     </div>
 
     <script>
+        document.querySelectorAll('.collapsible-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const content = header.nextElementSibling;
+                content.style.display = content.style.display === 'block' ? 'none' : 'block';
+            });
+        });
+
         function calculateMetrics() {
-            const val = id => parseFloat(document.getElementById(id).value) || 0;
-            const isValid = id => document.getElementById(id).checkValidity();
-            if (!['asv', 'velocity', 'totalSupply', 'marketPrice'].every(isValid)) {
-                alert("Please fill out all required fields.");
-                return;
-            }
+            // Get input values
+            const asv = parseFloat(document.getElementById('asv').value) || 0;
+            const asvGrowth = parseFloat(document.getElementById('asvGrowth').value) / 100 || 0;
+            const velocity = parseFloat(document.getElementById('velocity').value) || 1;
+            const velocityChange = parseFloat(document.getElementById('velocityChange').value) / 100 || 0;
+            const forecastHorizon = parseInt(document.getElementById('forecastHorizon').value) || 5;
+            const totalSupply = parseFloat(document.getElementById('totalSupply').value) || 0;
+            const lockedSupply = parseFloat(document.getElementById('lockedSupply').value) / 100 || 0;
+            const additionalLocked = parseFloat(document.getElementById('additionalLocked').value) / 100 || 0;
+            const burnRate = document.getElementById('useBurn').checked ? parseFloat(document.getElementById('burnRate').value) || 0 : 0;
+            const liquidityBuffer = document.getElementById('useBuffer').checked ? parseFloat(document.getElementById('liquidityBuffer').value) / 100 || 0 : 0;
+            const marketPrice = parseFloat(document.getElementById('marketPrice').value) || 0;
 
-            const inputs = {
-                asv: val("asv"),
-                asvGrowth: val("asvGrowth") / 100,
-                velocity: val("velocity"),
-                velocityChange: val("velocityChange") / 100,
-                forecastHorizon: val("forecastHorizon") || 5,
-                totalSupply: val("totalSupply"),
-                lockedSupply: val("lockedSupply") / 100,
-                additionalLocked: val("additionalLocked") / 100,
-                burnRate: document.getElementById("useBurnRate").checked ? val("burnRate") : 0,
-                liquidityBuffer: document.getElementById("useLiquidityBuffer").checked ? val("liquidityBuffer") / 100 : 0,
-                marketPrice: val("marketPrice"),
-                gasUsed: val("gasUsed"),
-                activeWallets: val("activeWallets"),
-                gini: val("giniCoefficient"),
-                slippageThreshold: val("slippageThreshold"),
-                marketDepth: val("marketDepth"),
-                energyUsed: val("energyUsed"),
-                stakingVelocity: val("stakingVelocity") || val("velocity"),
-                nominalVelocity: val("nominalVelocity") || val("velocity"),
-                deltaAsvPercent: val("deltaAsvPercent") / 100,
-                deltaMarketCapPercent: val("deltaMarketCapPercent") / 100 || 0.01,
-                deltaVelocityPercent: val("deltaVelocityPercent") / 100,
-                stdDev30Day: val("stdDev30Day"),
-                stdDev90Day: val("stdDev90Day"),
-                annualFlowReturn: val("annualFlowReturn") / 100,
-                marketReturn: val("marketReturn") / 100 || 0.01,
-                minEffectiveSupply: val("minEffectiveSupply") || (val("totalSupply") * 0.1),
-                theoreticalFlow: val("theoreticalFlow") || (val("asv") / val("velocity")),
-                newLiquidityBuffer: val("newLiquidityBuffer") / 100 || (val("liquidityBuffer") / 100)
-            };
+            // Core calculations
+            const effectiveSupply = totalSupply * (1 - lockedSupply);
+            const marketCap = effectiveSupply * marketPrice;
+            const flow = asv / velocity;
+            const adjustedFlow = flow * (1 + liquidityBuffer);
+            const impliedPrice = adjustedFlow / effectiveSupply;
 
-            const effectiveSupply = inputs.totalSupply * (1 - inputs.lockedSupply);
-            const flow = inputs.asv / inputs.velocity || 0;
-            const adjustedFlow = flow * (1 + inputs.liquidityBuffer);
-            const impliedPrice = adjustedFlow / effectiveSupply || 0;
-            const marketCap = effectiveSupply * inputs.marketPrice || 0;
+            // Future projections
+            const futureASV = asv * Math.pow(1 + asvGrowth, forecastHorizon);
+            const futureVelocity = velocity * Math.pow(1 + velocityChange, forecastHorizon);
+            const futureLockedSupply = Math.min(1, lockedSupply + additionalLocked);
+            const futureSupply = totalSupply * (1 - futureLockedSupply) - burnRate * forecastHorizon;
+            const futureFlow = futureASV / futureVelocity;
+            const futureAdjustedFlow = futureFlow * (1 + liquidityBuffer);
+            const futurePrice = futureAdjustedFlow / futureSupply;
 
-            const futureASV = inputs.asv * Math.pow(1 + inputs.asvGrowth, inputs.forecastHorizon);
-            const futureVelocity = inputs.velocity * Math.pow(1 + inputs.velocityChange, inputs.forecastHorizon);
-            const futureSupply = effectiveSupply * (1 - inputs.additionalLocked) - (inputs.burnRate * inputs.forecastHorizon);
-            const futureFlow = futureASV / futureVelocity || 0;
-            const futureAdjustedFlow = futureFlow * (1 + inputs.liquidityBuffer);
-            const futurePrice = futureAdjustedFlow / futureSupply || 0;
-            const cagr = Math.pow(futurePrice / impliedPrice, 1 / inputs.forecastHorizon) - 1 || 0;
-
-            const newImplied = (asvFactor, velFactor, supplyFactor = 1) => {
-                const newAsv = inputs.asv * asvFactor;
-                const newVel = inputs.velocity * velFactor;
-                const newSupply = effectiveSupply * supplyFactor;
-                const newFlow = newAsv / newVel || 0;
-                const newAdj = newFlow * (1 + inputs.liquidityBuffer);
-                return newAdj / newSupply || 0;
-            };
-
-            const results = [];
-            function add(num, label, value, tip, category) {
-                results.push({ num, label, value, tip, category });
-            }
-
-            const round = (x, d = 2) => isFinite(x) && !isNaN(x) ? x.toFixed(d) : "N/A";
-
-            // Core Valuation Metrics
-            add(1, "Current Effective Circulating Supply", round(effectiveSupply, 0), "Total supply adjusted for locked tokens.", "Core Valuation Metrics");
-            add(2, "Current Market Capitalization", "$" + round(marketCap), "Effective supply × current market price.", "Core Valuation Metrics");
-            add(3, "FLOW (Economic Base)", "$" + round(flow), "ASV ÷ Velocity, the economic base needed to support transactions.", "Core Valuation Metrics");
-            add(4, "Adjusted FLOW (with buffer)", "$" + round(adjustedFlow), "FLOW × (1 + Liquidity Buffer), adjusted for market stability.", "Core Valuation Metrics");
-            add(5, "Implied Price per Token", "$" + round(impliedPrice), "Adjusted FLOW ÷ Effective Supply, the fair price based on utility.", "Core Valuation Metrics");
-            add(6, "Fair Market Gap (%)", round(((impliedPrice - inputs.marketPrice) / inputs.marketPrice) * 100) + "%", "Percentage price increase needed to match FLOW’s fair value. Positive means undervalued.", "Core Valuation Metrics");
-            add(7, "FLOW-to-Price Ratio", round(flow / marketCap), "FLOW ÷ (Market Price × Effective Supply). Above 1 means fair utility price is higher than current.", "Core Valuation Metrics");
-            add(8, "FLOW Premium (%)", round(((marketCap - adjustedFlow) / adjustedFlow) * 100) + "%", "(Market Cap − Adjusted FLOW) ÷ Adjusted FLOW × 100%. Positive means undervalued.", "Core Valuation Metrics");
-
-            // Efficiency & Utility Metrics
-            add(9, "FLOW Yield", round(flow / marketCap), "FLOW ÷ Market Cap. Higher values indicate more liquidity support per dollar of market cap.", "Efficiency & Utility Metrics");
-            add(10, "FLOW Efficiency", round(inputs.asv / marketCap), "ASV ÷ Market Cap. Higher values show more settlement volume per dollar of market cap.", "Efficiency & Utility Metrics");
-            add(11, "Utilization Rate", round(inputs.asv / adjustedFlow), "ASV ÷ Adjusted FLOW. Measures how fully the economic base is utilized.", "Efficiency & Utility Metrics");
-            add(12, "Gas Efficiency Index", round(inputs.asv / inputs.gasUsed), "Value per unit cost. Low-cost networks win. Analogy: Miles per gallon for deliveries.", "Efficiency & Utility Metrics");
-            add(13, "Settlement per Wallet", round(inputs.asv / inputs.activeWallets), "Value per user. Quality of engagement. Analogy: Cargo per driver.", "Efficiency & Utility Metrics");
-            add(14, "Active User Concentration (Gini Coefficient)", round(inputs.gini), "Distribution of usage. High = centralized risk. Analogy: Few drivers doing all work.", "Efficiency & Utility Metrics");
-
-            // Liquidity & Stability Metrics
-            add(15, "Liquidity Stress Buffer Ratio", round((inputs.liquidityBuffer * flow) / marketCap), "(Liquidity Buffer × FLOW) ÷ Market Cap. Assesses liquidity reserves relative to valuation.", "Liquidity & Stability Metrics");
-            add(16, "Slippage Resilience Score", round(inputs.marketDepth / (inputs.asv + inputs.slippageThreshold)), "Resistance to large trades. Institutional safety. Analogy: Handling big cargo without delay.", "Liquidity & Stability Metrics");
-            add(17, "Price Stability under 10% Velocity Drop", round(1 / 0.9, 3), "New Implied Price ÷ Current Implied Price at Velocity × 0.9. Tests price resilience.", "Liquidity & Stability Metrics");
-            add(18, "Burn Amplification Factor", round(newImplied(1, 1, (effectiveSupply - inputs.burnRate) / effectiveSupply) / impliedPrice), "New Implied Price after Burn ÷ Current Implied Price. Quantifies price impact of burns.", "Liquidity & Stability Metrics");
-
-            // Placeholder for missing metrics
-            add(19, "Metric 19 (Not Specified)", "N/A", "Requires additional details from full whitepaper.", "Liquidity & Stability Metrics");
-            add(20, "Metric 20 (Not Specified)", "N/A", "Requires additional details from full whitepaper.", "Liquidity & Stability Metrics");
-            add(21, "Metric 21 (Not Specified)", "N/A", "Requires additional details from full whitepaper.", "Liquidity & Stability Metrics");
-            add(22, "Metric 22 (Not Specified)", "N/A", "Requires additional details from full whitepaper.", "Liquidity & Stability Metrics");
-
-            // Comparative Ratios
-            add(23, "FLOW Ratio", round(marketCap / flow), "Market Cap ÷ FLOW. ~1 means price aligns with utility; >1 indicates speculative premium.", "Comparative Ratios");
-            add(24, "FLOW Ratio (%)", round((marketCap / flow) * 100) + "%", "Market Cap ÷ FLOW × 100%. Below 100% suggests undervaluation.", "Comparative Ratios");
-            add(25, "Market Cap Coverage vs. Adjusted FLOW", round(marketCap / adjustedFlow), "Market Cap ÷ Adjusted FLOW. Measures market cap sufficiency for liquidity-adjusted FLOW.", "Comparative Ratios");
-            add(26, "Burn-Adjusted Fair Price", "$" + round(adjustedFlow / (effectiveSupply - inputs.burnRate)), "Adjusted FLOW ÷ Effective Supply after Burn. Adjusts fair price for token burns.", "Comparative Ratios");
-            add(27, "Lock-up Adjusted Liquidity Index", round(inputs.liquidityBuffer / (effectiveSupply / inputs.totalSupply)), "Lock-up liquidity effect. Restricted supply insight. Analogy: Spare capacity with parked trucks.", "Comparative Ratios");
-
-            // Risk & Volatility Metrics
-            add(28, "30-day FLOW Volatility", round(inputs.stdDev30Day), "Short-term base fluctuation. Stability for traders. Analogy: Bumpy roads in recent weeks. (Requires historical std dev input)", "Risk & Volatility Metrics");
-            add(29, "90-day FLOW Volatility", round(inputs.stdDev90Day), "Medium-term stability. Longer risk view. Analogy: Road conditions over a quarter. (Requires historical std dev input)", "Risk & Volatility Metrics");
-            add(30, "Annualized FLOW Return vs. Market", round(inputs.annualFlowReturn / inputs.marketReturn), "Performance comparison. Relative strength. Analogy: Fleet profits vs industry average. (Requires return inputs)", "Risk & Volatility Metrics");
-            add(31, "Implied Downside if ASV Drops 20%", round(0.8, 3), "Downturn impact. Bear case preparation. Analogy: Fewer deliveries in recession.", "Risk & Volatility Metrics");
-            add(32, "Implied Upside if Velocity Halves", round(1 / 0.5, 3), "Lower turnover benefit. Hoard scenarios. Analogy: Slower trips but higher value per trip.", "Risk & Volatility Metrics");
-
-            // Forecasting & Scenario Metrics
-            add(33, "Future Price (in " + inputs.forecastHorizon + " years)", "$" + round(futurePrice), "Projected ASV ÷ Projected Velocity ÷ Projected Effective Supply. Forecasts price based on growth.", "Forecasting & Scenario Metrics");
-            add(34, "5-year CAGR FLOW Price", round(cagr * 100) + "%", "(Future Price ÷ Current Price)^(1/5) - 1. Estimates annualized price growth.", "Forecasting & Scenario Metrics");
-            add(35, "ASV Growth Sensitivity", round(1, 3), "Price response to volume growth. Upside from adoption. Analogy: More cargo - higher truck value.", "Forecasting & Scenario Metrics");
-            add(36, "Velocity Decline Sensitivity", round(inputs.deltaImpliedPercent / inputs.deltaVelocityPercent || -1), "Impact of slower usage. Risk from hoarding. Analogy: Fewer trips - potential value rise. (Approx -1; use inputs for custom)", "Forecasting & Scenario Metrics");
-            add(37, "Max Lock-up Stress Test", "$" + round(adjustedFlow / inputs.minEffectiveSupply), "Extreme lock-up price. Worst-case supply crunch. Analogy: All but essential trucks parked.", "Forecasting & Scenario Metrics");
-            add(38, "Fair Market Gap in Bear vs Bull Scenarios", "N/A", "Range of valuations. Scenario planning. Analogy: Fleet in slow vs busy seasons. (Requires specific bear/bull inputs)", "Forecasting & Scenario Metrics");
-
-            // Operational Ratios
-            add(39, "Settlement Coverage Ratio", round(inputs.asv / marketCap), "ASV ÷ (Effective Supply × Price). Measures transaction coverage relative to valuation.", "Operational Ratios");
-            add(40, "Realized Settlement vs Theoretical FLOW", round(inputs.asv / (inputs.theoreticalFlow * inputs.velocity)), "Actual vs expected. Model validation. Analogy: Planned vs actual deliveries.", "Operational Ratios");
-            add(41, "Liquidity Expansion Coefficient", round(inputs.newLiquidityBuffer / inputs.liquidityBuffer), "Growth in liquidity. Scaling potential. Analogy: Adding trucks for expansion.", "Operational Ratios");
-            add(42, "Sustainability Index", round(inputs.asv / inputs.energyUsed), "Environmental efficiency. Addresses modern concerns. Analogy: Eco-friendly trucks that deliver more with less fuel emissions.", "Operational Ratios");
-            add(43, "Decentralization Score", round(1 - inputs.gini), "Spread of control and activity. Reduces centralization risks. Analogy: Fleet operated by many independent drivers, not one company.", "Operational Ratios");
+            // Additional metrics
+            const fairMarketGap = ((impliedPrice - marketPrice) / marketPrice * 100) || 0;
+            const flowToPrice = flow / (marketPrice * effectiveSupply) || 0;
+            const flowPremium = ((marketCap - adjustedFlow) / adjustedFlow * 100) || 0;
+            const flowYield = flow / marketCap || 0;
+            const flowEfficiency = asv / marketCap || 0;
+            const utilizationRate = asv / adjustedFlow || 0;
+            const liquidityBufferRatio = (liquidityBuffer * flow) / marketCap || 0;
+            const priceStability = (adjustedFlow / (effectiveSupply * velocity * 0.9)) / impliedPrice || 0;
+            const burnAdjustedSupply = effectiveSupply - burnRate;
+            const burnAmplification = burnAdjustedSupply > 0 ? (adjustedFlow / burnAdjustedSupply) / impliedPrice : 0;
+            const lockupSupply = totalSupply * (1 - (lockedSupply + additionalLocked));
+            const lockupImpact = lockupSupply > 0 ? (adjustedFlow / lockupSupply) / impliedPrice : 0;
+            const flowRatio = marketCap / flow || 0;
+            const flowRatioPercent = flowRatio * 100;
+            const marketCapCoverage = marketCap / adjustedFlow || 0;
+            const burnAdjustedPrice = burnAdjustedSupply > 0 ? adjustedFlow / burnAdjustedSupply : 0;
+            const settlementCoverage = asv / (effectiveSupply * marketPrice) || 0;
 
             // Update results
-            const categories = [
-                "Core Valuation Metrics",
-                "Efficiency & Utility Metrics",
-                "Liquidity & Stability Metrics",
-                "Comparative Ratios",
-                "Forecasting & Scenario Metrics",
-                "Operational Ratios"
-            ];
-            let html = '<h3>Results</h3>';
-            categories.forEach(category => {
-                html += `<div class="section"><h4>${category}</h4>`;
-                results.filter(r => r.category === category).forEach(r => {
-                    html += `<div class="tooltip"><strong>${r.num}. ${r.label}:</strong> ${r.value}<span class="tooltiptext">${r.tip}</span></div>`;
-                });
-                html += '</div>';
-            });
-            document.getElementById("resultsContainer").innerHTML = html;
+            document.getElementById('effectiveSupply').textContent = effectiveSupply.toLocaleString();
+            document.getElementById('marketCap').textContent = `$${marketCap.toLocaleString()}`;
+            document.getElementById('flow').textContent = `$${flow.toLocaleString()}`;
+            document.getElementById('adjustedFlow').textContent = `$${adjustedFlow.toLocaleString()}`;
+            document.getElementById('impliedPrice').textContent = `$${impliedPrice.toFixed(2)}`;
+            document.getElementById('fairMarketGap').textContent = `${fairMarketGap.toFixed(2)}%`;
+            document.getElementById('flowToPrice').textContent = flowToPrice.toFixed(2);
+            document.getElementById('flowPremium').textContent = `${flowPremium.toFixed(2)}%`;
+            document.getElementById('flowYield').textContent = flowYield.toFixed(2);
+            document.getElementById('flowEfficiency').textContent = flowEfficiency.toFixed(2);
+            document.getElementById('utilizationRate').textContent = utilizationRate.toFixed(2);
+            document.getElementById('liquidityBufferRatio').textContent = liquidityBufferRatio.toFixed(2);
+            document.getElementById('priceStability').textContent = priceStability.toFixed(2);
+            document.getElementById('burnAmplification').textContent = burnAmplification.toFixed(2);
+            document.getElementById('lockupImpact').textContent = lockupImpact.toFixed(2);
+            document.getElementById('flowRatio').textContent = flowRatio.toFixed(2);
+            document.getElementById('flowRatioPercent').textContent = `${flowRatioPercent.toFixed(2)}%`;
+            document.getElementById('marketCapCoverage').textContent = marketCapCoverage.toFixed(2);
+            document.getElementById('burnAdjustedPrice').textContent = `$${burnAdjustedPrice.toFixed(2)}`;
+            document.getElementById('futurePrice').textContent = `$${futurePrice.toFixed(2)}`;
+            document.getElementById('forecastYears').textContent = forecastHorizon;
+            document.getElementById('cagrPrice').textContent = `${((Math.pow(futurePrice / impliedPrice, 1 / forecastHorizon) - 1) * 100).toFixed(2)}%`;
+            document.getElementById('settlementCoverage').textContent = settlementCoverage.toFixed(2);
         }
     </script>
 </body>
